@@ -1,0 +1,204 @@
+---
+title: "Homework 4"
+author: "Aidan Baker"
+output:
+  html_document:
+    code_folding: show
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE,
+                      warning = FALSE)
+```
+
+## Resampling
+
+For this assignment, we will continue working with part of a [Kaggle data set](https://www.kaggle.com/c/titanic/overview) that was the subject of a machine learning competition and is often used for practicing ML models. The goal is classification; specifically, to predict which passengers would survive the [Titanic shipwreck](https://en.wikipedia.org/wiki/Titanic).
+
+![Fig. 1: RMS Titanic departing Southampton on April 10, 1912.](images/RMS_Titanic.jpg){width="363"}
+
+Load the data from `data/titanic.csv` into *R* and familiarize yourself with the variables it contains using the codebook (`data/titanic_codebook.txt`).
+
+Notice that `survived` and `pclass` should be changed to factors. When changing `survived` to a factor, you may want to reorder the factor so that *"Yes"* is the first level.
+
+Make sure you load the `tidyverse` and `tidymodels`!
+
+```{r}
+
+library(tidyverse)
+library(tidymodels)
+library(ggplot2)
+library(corrplot)
+library("dplyr") 
+library(MASS)
+library(discrim)
+titanic <- read.csv('/Users/aidanbaker/Downloads/homework-3/data/titanic.csv') %>%
+  mutate(survived = factor(survived,
+                           levels = c("Yes","No")),
+         pclass = factor(pclass))
+
+
+
+```
+
+
+
+
+Create a recipe for this dataset **identical** to the recipe you used in Homework 3.
+
+### Question 1
+
+Split the data, stratifying on the outcome variable, `survived.`  You should choose the proportions to split the data into. Verify that the training and testing data sets have the appropriate number of observations. 
+
+
+```{r}
+
+set.seed(2001)
+
+##splitting the data into training and testing
+
+titanic_split <- initial_split(titanic, prop = .75,
+                               strata = survived)
+titanic_training <- training(titanic_split)
+titanic_testing <- testing(titanic_split)
+
+titanic_recipe <- recipe(survived ~ pclass + sex + age + sib_sp + parch + fare, data = titanic_training) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors()) %>%
+  step_impute_linear(age)
+
+
+
+```
+
+
+### Question 2
+
+Fold the **training** data. Use *k*-fold cross-validation, with $k = 10$.
+
+```{r}
+## folding data
+
+titanic_fold = vfold_cv(titanic_training, v = 10)
+
+
+
+```
+
+
+### Question 3
+
+In your own words, explain what we are doing in Question 2. What is *k*-fold cross-validation? Why should we use it, rather than simply fitting and testing models on the entire training set? If we **did** use the entire training set, what resampling method would that be?
+
+
+In question two we are splitting our data from the titanic trainig into 10 groups in order to see how the data performs when looking at smaller groups. It is good to fold the data because we want to see how our machine learning alogroithms performs in a less than ideal situation rather than the tradition method of splitting into training and testing. When we use the entire training set, it is testing resampling. 
+
+
+### Question 4
+
+Set up workflows for 3 models:
+
+1. A logistic regression with the `glm` engine;
+2. A linear discriminant analysis with the `MASS` engine;
+3. A quadratic discriminant analysis with the `MASS` engine.
+
+How many models, total, across all folds, will you be fitting to the data? To answer, think about how many folds there are, and how many models you'll fit to each fold.
+
+```{r}
+
+#Logistic
+logistic_model <- logistic_reg() %>% set_mode('classification') %>% set_engine('glm')
+logistic_workflow <- workflow() %>% add_model(logistic_model) %>% add_recipe(titanic_recipe)
+
+#Linear
+linear_model <- discrim_linear() %>% set_mode('classification') %>% set_engine('MASS')
+linear_workflow <- workflow() %>% add_model(linear_model) %>% add_recipe(titanic_recipe)
+
+#Quadratic
+quadratic_model <- discrim_quad() %>% set_mode('classification') %>% set_engine('MASS')
+quadratic_workflow <- workflow() %>% add_model(quadratic_model) %>% add_recipe(titanic_recipe)
+
+
+
+
+
+```
+
+
+We are fitting a total of 30 models since there are 3 with 10 folds each.
+
+### Question 5
+
+Fit each of the models created in Question 4 to the folded data.
+
+**IMPORTANT:** *Some models may take a while to run – anywhere from 3 to 10 minutes. You should NOT re-run these models each time you knit. Instead, run them once, using an R script, and store your results; look into the use of [loading and saving](https://www.r-bloggers.com/2017/04/load-save-and-rda-files/). You should still include the code to run them when you knit, but set `eval = FALSE` in the code chunks.*
+
+```{r}
+
+fit_logistic <- fit_resamples(logistic_workflow, titanic_fold)
+head(fit_logistic)
+
+fit_linear <- fit_resamples(linear_workflow, titanic_fold)
+head(fit_linear)
+
+fit_quadratic <- fit_resamples(quadratic_workflow, titanic_fold)
+head(fit_quadratic)
+
+
+
+```
+
+
+
+### Question 6
+
+Use `collect_metrics()` to print the mean and standard errors of the performance metric *accuracy* across all folds for each of the four models.
+
+```{r}
+
+logistic_metric <- collect_metrics(fit_logistic)
+linear_metric <- collect_metrics(fit_linear)
+quadratic_metric <- collect_metrics(fit_quadratic)
+
+logistic_metric
+linear_metric
+quadratic_metric
+
+```
+
+Based on the metric given above, we see that logistic performed the best out of the three, although all three performed very similarly. Although logistic didnt have the lowest standard error, it had the best accuracy and its error was very similar to the other two.
+
+
+### Question 7
+
+Now that you’ve chosen a model, fit your chosen model to the entire training dataset (not to the folds).
+
+```{r}
+
+logistic_fit <- fit(logistic_workflow, data = titanic_training)
+
+```
+
+
+### Question 8
+
+Finally, with your fitted model, use `predict()`, `bind_cols()`, and `accuracy()` to assess your model’s performance on the testing data!
+
+Compare your model’s testing accuracy to its average accuracy across folds. Describe what you see.
+
+```{r}
+
+Logistic_accuracy <- predict(logistic_fit, new_data = titanic_testing, type = 'class') %>% bind_cols(titanic_testing) %>% accuracy(truth = survived, estimate = .pred_class)
+
+Logistic_accuracy
+logistic_metric
+
+```
+
+We get an accuracy of around .8125 with our testing data which is slightly more accurate of a result than our folding data produced. This could likely be due to higher variance among the results when looking at 10 folds. In conclusion, we can say that our accuracy produced a good result and that our data fit the model well.
+
